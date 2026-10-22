@@ -1,3 +1,25 @@
+# Team ferminator — solution
+
+This repository is team **ferminator**'s entry. Everything below the line is the organisers'
+challenge repository, kept unchanged; our work is in [`solution/`](solution) and the technical
+document is [`ferminator.md`](ferminator.md).
+
+**Method in one line:** dead balls from the ball leaving the pitch or the whole team slowing to a
+walk; in live play the ball belongs to the last team in *control*, and changes hands only when
+the other team keeps it or passes it on, not on a deflection.
+
+**Regenerate the submission** (the match data is not in this repository — unpack it into `./data`
+or point `MTAH_DATA_DIR` at it):
+
+```bash
+pip install -r solution/requirements.txt
+python solution/run.py                                        # -> evaluation/results/ferminator.csv
+python evaluation/validate_submission.py evaluation/results/ferminator.csv
+python evaluation/run_evaluation.py                           # public 5 minutes: spellF1 0.5667
+```
+
+---
+
 # More than a Hack 2027 — Phase 1: Ball Possession
 
 **Organised by [Metrica Sports](https://metrica-sports.com), [FC Barcelona](https://www.fcbarcelona.com)
