@@ -161,6 +161,7 @@ the public-window scores next to full-match totals:
 | whistle time from players braking together | never fires: the provided player speeds are too smooth for a sharp braking moment | dropped |
 | reject slow phases in which passes keep flowing | no slow phase qualified: the stoppage detector shows no such false positives | dropped |
 | goalkeeper repair | public unchanged, 6 false possessions removed over the full match | **kept** |
+| re-time switches inside ball gaps with a two-state Viterbi on team shape (`place_in_gaps`) | public spellF1 0.587 or unchanged across gap lengths, costs and weights; never better. With hidden turnovers inserted inside gaps: 0.550 and 24 extra possessions | dropped: the shape model is good at *which* team (it powers the veto) but not precise enough to say *when* inside a gap |
 | team-shape veto, 2 / 4 / 6 s | public spellF1 0.588 / 0.600 / 0.643 and macroF1 0.873 / 0.879 / 0.894: every setting better than without it, and the 4 s score is the same for any threshold from 0.25 to 0.45 | **kept at 4 s / 0.35**, the middle of the stable region. The 6 s version scores higher but merges more (16.1 s mean possession), and over-merging is costly on the full match |
 
 ## 6. Limitations and what we would do next
@@ -170,11 +171,11 @@ the public-window scores next to full-match totals:
   false possession. A fix: re-assign slot teams by formation, since a player usually sits among
   their own team's shape.
 - **Ball visible on only ~59% of graded frames.** Possession holds through gaps, so a change of
-  possession that happens entirely while the ball is invisible is detected late or missed. The
-  team-shape model currently only *removes* doubtful possessions. Letting it also *place*
-  switches inside long ball gaps (for example with a two-state Viterbi over touches plus shape
-  evidence) is the natural next step. A ball detector on the tactical video (the homography
-  maps it straight to the pitch) would fill many gaps directly.
+  possession that happens entirely while the ball is invisible is detected late or missed. We
+  tried letting the team-shape model place switches inside gaps, and it did not help (see the
+  table above): shape lags the real turnover by a second or two. A ball detector on the
+  tactical video (the homography maps it straight to the pitch) would fill many gaps directly,
+  and is what we would build next.
 - **Stoppage timing.** The whistle is inferred from the players' pace. Short stoppages with a
   quick restart (a fast free kick) can be missed, and slow build-up phases at the back can be
   mistaken for stoppages.
