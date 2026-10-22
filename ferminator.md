@@ -24,13 +24,25 @@ thresholds.
 - Gaps of up to **2 s** are bridged by linear interpolation. Longer gaps are left empty, and
   possession simply holds through them.
 
-### 2.2 Touches (`touches`, `touch_episodes`)
+### 2.2 Goalkeeper repair (`keeper_teams`)
+Track slots carry one team for the whole match, but the tracker sometimes hands a slot to a
+different person. One case can be fixed from geometry alone:
+- Split every slot into segments wherever it is lost or jumps more than 3 m in one frame.
+- A segment lasting at least 2 s in which the slot is the deepest player near one goal (within
+  20 m of the line, central 40 m) for over 80% of its frames is that goal's keeper.
+- Its team is corrected to the team defending that goal. Each half's goal sides come from the
+  teams' mean positions.
+
+This removes 6 possessions over the full match that came from a keeper tracked with the
+opponent's team.
+
+### 2.3 Touches (`touches`, `touch_episodes`)
 - A team **touches** the ball on a frame when its nearest player is within **1.0 m** of the ball
   and nearer than every opponent.
 - Touch frames of one team separated by at most 3 frames form a **touch episode**: one player or
   team on the ball.
 
-### 2.3 Dead ball (`dead_half`, `slow_stoppages`)
+### 2.4 Dead ball (`dead_half`, `slow_stoppages`)
 Play stops on either of two triggers:
 1. **The ball leaves the pitch:** more than 0.5 m beyond a touchline or goal line.
 2. **The whole team slows to a walk:** the ±2 s mean speed of all tracked players drops below
@@ -45,7 +57,7 @@ next 0.5 s). In slowdown stoppages the kick is only accepted near the end of the
 because players rolling the ball to the taker look like a kick. If no kick is seen, play
 restarts 1 s after the players are moving again.
 
-### 2.4 Possession (`possession_run`)
+### 2.5 Possession (`possession_run`)
 For each stretch of live play:
 - It opens with the team of the first touch: the restart taker, who often has the ball before
   the restart.
@@ -98,9 +110,21 @@ public score. Instead:
   frames) and stoppage speed (0.9–1.2 m/s), and chose values in the middle of the flat region
   rather than the best single cell. For example, 1.1 m/s rather than 1.2 m/s for stoppages, even
   though 1.2 scores higher on the public window.
-- **Full-match plausibility.** Our labels give 301 possessions averaging 12.6 s, against 14.2 s
-  in the public sample. They also give about 105 stoppages and a dead-ball share of about 40%,
-  in line with typical ball-in-play figures for professional football.
+- **Full-match plausibility.** Our labels give 295 possessions averaging 12.9 s, against 14.2 s
+  in the public sample. They also give 105 stoppages and a dead-ball share of 40%, in line with
+  typical ball-in-play figures for professional football.
+
+### Ideas we tried and dropped
+Each was built behind a switch and compared with `python solution/experiment.py`, which prints
+the public-window scores next to full-match totals:
+
+| idea | result | decision |
+|---|---|---|
+| merge possessions under 1–2 s sandwiched between spells of the other team | public spellF1 0.529 / 0.529 / 0.588 for 1.0 / 1.5 / 2.0 s: inconsistent, and the truth contains real 0.8 s possessions | dropped |
+| restart from a placed, stationary ball | almost never fires: restarts are already found by the kick rule | dropped |
+| whistle time from players braking together | never fires: the provided player speeds are too smooth for a sharp braking moment | dropped |
+| reject slow phases in which passes keep flowing | no slow phase qualified: the stoppage detector shows no such false positives | dropped |
+| goalkeeper repair | public unchanged, 6 false possessions removed over the full match | **kept** |
 - **Independent second opinion.** Our team labels agree with Smart Tagging's attacking-phase
   teams across the whole match more often than the official baselines do.
 
@@ -135,5 +159,13 @@ the 196 MB tracking file and caches it as `.npz` next to the data (never inside 
 Later runs take a few seconds.
 
 Code: `solution/load.py` (data), `solution/possession.py` (the method, all parameters in
-`DEFAULTS`), `solution/run.py` (entry point), `solution/devscore.py` and `solution/tagcheck.py`
-(development checks only).
+`DEFAULTS`), `solution/run.py` (entry point), `solution/experiment.py` (variant comparison),
+`solution/synthetic.py` (a made-up match for testing code without the data),
+`solution/devscore.py` and `solution/tagcheck.py` (development checks only).
+
+## 8. Tools used
+
+The code was written with the help of Claude, Anthropic's AI assistant. Early in development, small
+extracts of the match data were shown to the assistant during analysis. Once we found that the
+terms forbid this, we reported it to the organisers. From then on, the assistant only saw code,
+the public documentation, synthetic data and aggregate scores printed by our scripts.

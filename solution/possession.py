@@ -36,11 +36,12 @@ DEFAULTS = dict(
     restart_window=100,    # frames; restart kick accepted from this long before the walk ends
     restart_grace=25,      # frames; with no kick seen, play restarts this long after the walk
 
-    # Experimental, all off by default (0). See solution/experiment.py for the comparisons.
+    keeper_fix=50,         # frames; a track segment at least this long that is the deepest
+                           # player at one goal most of the time is that goal's keeper. 0 disables
+
+    # Experimental, off by default (0): no measurable gain. See solution/experiment.py.
     merge_short=0,         # frames; an A between two H spells (or vice versa) shorter than this
                            # is absorbed by its neighbours
-    keeper_fix=0,          # frames; a track segment at least this long that is the deepest
-                           # player at one goal most of the time is that goal's keeper
     placed_restart=0,      # frames; a ball still for this long that then moves away from a
                            # player is a restart (corner, goal kick, throw-in, kick-off, free kick)
     whistle_sync=0.0,      # fraction of players decelerating together that marks the whistle

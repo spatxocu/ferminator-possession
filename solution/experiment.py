@@ -27,12 +27,11 @@ GRADED = np.r_[11185:90652, 110808:190198]
 # name -> parameter overrides of possession.DEFAULTS. "current" is the submitted method.
 VARIANTS = {
     "current": {},
+    "no_keeper_fix": {"keeper_fix": 0},
     # Merge short sandwiched spells (simulations favour ~1.5 s when the output is over-split).
     "merge_38": {"merge_short": 38},
     "merge_25": {"merge_short": 25},
     "merge_50": {"merge_short": 50},
-    # Repair mislabelled goalkeeper tracks.
-    "keeper_fix": {"keeper_fix": 50},
     # Restart from a placed, stationary ball.
     "placed_25": {"placed_restart": 25},
     "placed_50": {"placed_restart": 50},
@@ -42,8 +41,7 @@ VARIANTS = {
     # A "walk" with passes still flowing is not a stoppage.
     "walk_guard_3": {"walk_guard": 3},
     # Everything together.
-    "all": {"merge_short": 38, "keeper_fix": 50, "placed_restart": 25,
-            "whistle_sync": 0.35, "walk_guard": 3},
+    "all": {"merge_short": 38, "placed_restart": 25, "whistle_sync": 0.35, "walk_guard": 3},
 }
 
 
