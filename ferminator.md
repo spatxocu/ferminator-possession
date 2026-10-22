@@ -12,9 +12,14 @@ balls, deflections and 50/50 challenges change nothing. That is the definition i
 written as code, and it is what keeps the number of possessions realistic, which the ranking
 metric (spellF1) rewards above everything else.
 
-The whole method is about 300 lines of numpy and runs in seconds. There is no model and no
-training, so there is nothing to overfit to the 5 public minutes beyond a few interpretable
-thresholds.
+On top of that, a small **team-shape model** judges who has the ball from how the two teams are
+positioned and moving. That information is there on every frame, including the 41% where the
+ball is not. The model is trained on our own confident output, never on hand labels or the
+public ground truth, and it acts only as a veto on short, doubtful possessions.
+
+The whole method is plain numpy and runs in under a minute. Apart from the 14-weight logistic
+regression, it consists of interpretable thresholds, so there is little to overfit to the 5
+public minutes.
 
 ## 2. Pipeline
 
@@ -69,6 +74,34 @@ For each stretch of live play:
   ground truth the label changes as the ball leaves the new possessor, slightly after contact.
 - Live frames with no touch at all yet take the last team named in the half.
 
+### 2.6 Team-shape veto (`shape.py`)
+A team with the ball spreads out and pushes up, while the team without it gets compact and drops
+back or presses. We turn that into a model and use it to veto doubtful possessions.
+
+**Features:** 14 per frame, from the home team's point of view with x flipped so that home
+always attacks towards +x:
+- each team's centroid x and its velocity over 1 s
+- each team's spread (std of x and y)
+- home players past halfway, and away players in their own half
+- each team's mean speed
+- the ball's x position (0 when unseen), and whether it is seen
+
+**Model:** L2-regularised logistic regression, fitted by Newton's method in numpy.
+
+**Training data:** our own labels, never the truth. We take the middle of every possession
+lasting at least 5 s, trimming 1 s at each end and sampling every 0.2 s. The public 5-minute
+window is excluded from training.
+
+**Quality:** on that held-out window the model agrees with the ground truth on **88.8%** of
+live frames, and on 92.2% of the 86% of frames where it is confident (p < 0.25 or > 0.75).
+
+**Use:** a possession is vetoed and absorbed by its neighbours when all of these hold:
+- it is shorter than **4 s**
+- it sits between two spells of the other team, with no stoppage in between
+- the model's mean probability for its team over its frames is below **0.35**
+
+Real quick turnovers survive whenever the shapes agree with them.
+
 ## 3. Possession rules we implemented
 
 | situation | our label |
@@ -99,7 +132,8 @@ On the public 5 minutes (`python evaluation/run_evaluation.py`):
 
 | | spellF1 | macroF1 | possessions (truth: 17) |
 |---|---|---|---|
-| **this method** | **0.567** | **0.866** | 19 |
+| **this method** | **0.600** | **0.879** | 18 |
+| this method without the team-shape veto | 0.567 | 0.866 | 19 |
 | baseline_smooth125 | 0.424 | 0.581 | 16 |
 | baseline_smooth50 (published floor) | 0.326 | 0.621 | 26 |
 
@@ -110,9 +144,11 @@ public score. Instead:
   frames) and stoppage speed (0.9–1.2 m/s), and chose values in the middle of the flat region
   rather than the best single cell. For example, 1.1 m/s rather than 1.2 m/s for stoppages, even
   though 1.2 scores higher on the public window.
-- **Full-match plausibility.** Our labels give 295 possessions averaging 12.9 s, against 14.2 s
+- **Full-match plausibility.** Our labels give 249 possessions averaging 15.2 s, against 14.2 s
   in the public sample. They also give 105 stoppages and a dead-ball share of 40%, in line with
   typical ball-in-play figures for professional football.
+- **Independent second opinion.** Our team labels agree with Smart Tagging's attacking-phase
+  teams across the whole match more often than the official baselines do.
 
 ### Ideas we tried and dropped
 Each was built behind a switch and compared with `python solution/experiment.py`, which prints
@@ -125,8 +161,7 @@ the public-window scores next to full-match totals:
 | whistle time from players braking together | never fires: the provided player speeds are too smooth for a sharp braking moment | dropped |
 | reject slow phases in which passes keep flowing | no slow phase qualified: the stoppage detector shows no such false positives | dropped |
 | goalkeeper repair | public unchanged, 6 false possessions removed over the full match | **kept** |
-- **Independent second opinion.** Our team labels agree with Smart Tagging's attacking-phase
-  teams across the whole match more often than the official baselines do.
+| team-shape veto, 2 / 4 / 6 s | public spellF1 0.588 / 0.600 / 0.643 and macroF1 0.873 / 0.879 / 0.894: every setting better than without it, and the 4 s score is the same for any threshold from 0.25 to 0.45 | **kept at 4 s / 0.35**, the middle of the stable region. The 6 s version scores higher but merges more (16.1 s mean possession), and over-merging is costly on the full match |
 
 ## 6. Limitations and what we would do next
 
@@ -135,9 +170,11 @@ the public-window scores next to full-match totals:
   false possession. A fix: re-assign slot teams by formation, since a player usually sits among
   their own team's shape.
 - **Ball visible on only ~59% of graded frames.** Possession holds through gaps, so a change of
-  possession that happens entirely while the ball is invisible is detected late or missed. A
-  ball detector on the tactical video (the homography maps it straight to the pitch) would fill
-  many gaps.
+  possession that happens entirely while the ball is invisible is detected late or missed. The
+  team-shape model currently only *removes* doubtful possessions. Letting it also *place*
+  switches inside long ball gaps (for example with a two-state Viterbi over touches plus shape
+  evidence) is the natural next step. A ball detector on the tactical video (the homography
+  maps it straight to the pitch) would fill many gaps directly.
 - **Stoppage timing.** The whistle is inferred from the players' pace. Short stoppages with a
   quick restart (a fast free kick) can be missed, and slow build-up phases at the back can be
   mistaken for stoppages.

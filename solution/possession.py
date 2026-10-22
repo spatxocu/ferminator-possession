@@ -38,6 +38,9 @@ DEFAULTS = dict(
 
     keeper_fix=50,         # frames; a track segment at least this long that is the deepest
                            # player at one goal most of the time is that goal's keeper. 0 disables
+    shape_veto_len=100,    # frames; a sandwiched possession shorter than this is vetoed when the
+                           # team-shape model (solution/shape.py) disagrees with it. 0 disables
+    shape_veto_p=0.35,     # ...i.e. gives the possessing team less than this probability
 
     # Experimental, off by default (0): no measurable gain. See solution/experiment.py.
     merge_short=0,         # frames; an A between two H spells (or vice versa) shorter than this
@@ -46,8 +49,6 @@ DEFAULTS = dict(
                            # player is a restart (corner, goal kick, throw-in, kick-off, free kick)
     whistle_sync=0.0,      # fraction of players decelerating together that marks the whistle
     walk_guard=0,          # kicks in the first 60% of a walk that mean play is still flowing
-    shape_veto_len=0,      # frames; short sandwiched possessions the team-shape model may veto
-    shape_veto_p=0.35,     # ...when it gives the possessing team less than this probability
 )
 
 

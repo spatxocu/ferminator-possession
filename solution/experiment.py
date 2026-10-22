@@ -27,8 +27,8 @@ GRADED = np.r_[11185:90652, 110808:190198]
 # name -> parameter overrides of possession.DEFAULTS. "current" is the submitted method.
 VARIANTS = {
     "current": {},
+    "no_shape_veto": {"shape_veto_len": 0},
     # Team-shape veto of short sandwiched possessions: (max length, min probability).
-    "shape_4s_0.35": {"shape_veto_len": 100, "shape_veto_p": 0.35},
     "shape_4s_0.25": {"shape_veto_len": 100, "shape_veto_p": 0.25},
     "shape_4s_0.45": {"shape_veto_len": 100, "shape_veto_p": 0.45},
     "shape_2s_0.35": {"shape_veto_len": 50, "shape_veto_p": 0.35},
