@@ -46,6 +46,8 @@ DEFAULTS = dict(
                            # player is a restart (corner, goal kick, throw-in, kick-off, free kick)
     whistle_sync=0.0,      # fraction of players decelerating together that marks the whistle
     walk_guard=0,          # kicks in the first 60% of a walk that mean play is still flowing
+    shape_veto_len=0,      # frames; short sandwiched possessions the team-shape model may veto
+    shape_veto_p=0.35,     # ...when it gives the possessing team less than this probability
 )
 
 
@@ -365,7 +367,9 @@ def fill_unknown(labels):
     return labels
 
 
-def predict(players, ball, team, params=None, n_frames=None):
+def predict(players, ball, team, params=None, n_frames=None, extras=None):
+    """Labels for every video frame. If `extras` is a dict, the team-shape model's per-frame
+    home probability is stored in it under "shape_prob" (computed only when asked for)."""
     p = dict(DEFAULTS, **(params or {}))
     n_frames = n_frames or len(ball)
     xy, seen = clean_ball(ball, p)
@@ -385,4 +389,12 @@ def predict(players, ball, team, params=None, n_frames=None):
     for first, last in HALVES:
         labels[first:last + 1] = label_half(first, last, touch, out, speed, stoppages, placed,
                                             episodes, p)
+
+    if p["shape_veto_len"] > 0 or extras is not None:
+        import shape
+        prob = shape.home_probability(players, team_f, xy, seen, labels)
+        if extras is not None:
+            extras["shape_prob"] = prob
+        if p["shape_veto_len"] > 0:
+            labels = shape.veto_short(labels, prob, p["shape_veto_len"], p["shape_veto_p"])
     return labels

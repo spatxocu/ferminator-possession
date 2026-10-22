@@ -27,22 +27,35 @@ GRADED = np.r_[11185:90652, 110808:190198]
 # name -> parameter overrides of possession.DEFAULTS. "current" is the submitted method.
 VARIANTS = {
     "current": {},
-    "no_keeper_fix": {"keeper_fix": 0},
-    # Merge short sandwiched spells (simulations favour ~1.5 s when the output is over-split).
-    "merge_38": {"merge_short": 38},
-    "merge_25": {"merge_short": 25},
-    "merge_50": {"merge_short": 50},
-    # Restart from a placed, stationary ball.
-    "placed_25": {"placed_restart": 25},
-    "placed_50": {"placed_restart": 50},
-    # Whistle timing from players braking together.
-    "whistle_0.35": {"whistle_sync": 0.35},
-    "whistle_0.25": {"whistle_sync": 0.25},
-    # A "walk" with passes still flowing is not a stoppage.
-    "walk_guard_3": {"walk_guard": 3},
-    # Everything together.
-    "all": {"merge_short": 38, "placed_restart": 25, "whistle_sync": 0.35, "walk_guard": 3},
+    # Team-shape veto of short sandwiched possessions: (max length, min probability).
+    "shape_4s_0.35": {"shape_veto_len": 100, "shape_veto_p": 0.35},
+    "shape_4s_0.25": {"shape_veto_len": 100, "shape_veto_p": 0.25},
+    "shape_4s_0.45": {"shape_veto_len": 100, "shape_veto_p": 0.45},
+    "shape_2s_0.35": {"shape_veto_len": 50, "shape_veto_p": 0.35},
+    "shape_6s_0.35": {"shape_veto_len": 150, "shape_veto_p": 0.35},
 }
+# Tried and dropped (see ferminator.md): merge_short, placed_restart, whistle_sync, walk_guard.
+
+
+def shape_report(players, ball, team):
+    """How good is the team-shape model? Agreement with the public ground truth (never used in
+    training) and with our own labels over the full match. Aggregates only."""
+    extras = {}
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore")
+        labels = possession.predict(players, ball, team, extras=extras)
+    prob = extras["shape_prob"]
+    gt = devscore.gt_labels()
+    live = np.isin(gt, ["H", "A"]) & ~np.isnan(prob)
+    gt_acc = np.mean((prob[live] > 0.5) == (gt[live] == "H")) if live.any() else np.nan
+    ours = np.isin(labels, ["H", "A"]) & ~np.isnan(prob)
+    our_acc = np.mean((prob[ours] > 0.5) == (labels[ours] == "H"))
+    confident = live & (np.abs(prob - 0.5) > 0.25)
+    conf_acc = (np.mean((prob[confident] > 0.5) == (gt[confident] == "H"))
+                if confident.any() else np.nan)
+    print("shape model: public-truth accuracy {:.3f} | when confident (p<0.25 or >0.75) {:.3f} "
+          "on {:.0%} of frames | agrees with our labels over the match {:.3f}".format(
+              gt_acc, conf_acc, confident.sum() / max(live.sum(), 1), our_acc))
 
 
 def totals(labels):
@@ -69,6 +82,7 @@ def main():
         from load import load
         players, ball, team = load()
 
+    shape_report(players, ball, team)
     print("{:<26} {:>8} {:>8} {:>6} {:>6} {:>5} {:>6}".format(
         "variant", "spellF1", "macroF1", "poss", "len_s", "dead", "Dshare"))
     for name, params in VARIANTS.items():
