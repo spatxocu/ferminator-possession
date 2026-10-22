@@ -35,6 +35,16 @@ DEFAULTS = dict(
     slow_backoff=150,      # frames; look this far back for the pace peak that marks the whistle
     restart_window=100,    # frames; restart kick accepted from this long before the walk ends
     restart_grace=25,      # frames; with no kick seen, play restarts this long after the walk
+
+    # Experimental, all off by default (0). See solution/experiment.py for the comparisons.
+    merge_short=0,         # frames; an A between two H spells (or vice versa) shorter than this
+                           # is absorbed by its neighbours
+    keeper_fix=0,          # frames; a track segment at least this long that is the deepest
+                           # player at one goal most of the time is that goal's keeper
+    placed_restart=0,      # frames; a ball still for this long that then moves away from a
+                           # player is a restart (corner, goal kick, throw-in, kick-off, free kick)
+    whistle_sync=0.0,      # fraction of players decelerating together that marks the whistle
+    walk_guard=0,          # kicks in the first 60% of a walk that mean play is still flowing
 )
 
 
@@ -60,11 +70,56 @@ def clean_ball(ball, p):
     return filled, seen
 
 
+def track_segments(xy, max_jump):
+    """(start, end) runs where one track slot is continuously observed, cut where it jumps more
+    than max_jump metres between frames -- the tracker has moved the slot to someone else."""
+    seen = ~np.isnan(xy[:, 0])
+    jump = np.r_[False, np.linalg.norm(np.diff(xy, axis=0), axis=1) > max_jump]
+    starts = np.flatnonzero(seen & (~np.r_[False, seen[:-1]] | jump))
+    ends = np.flatnonzero(seen & (~np.r_[seen[1:], False] | np.r_[jump[1:], False]))
+    return list(zip(starts, ends))
+
+
+def keeper_teams(players, team, p):
+    """Per-frame team of every track slot, with mislabelled goalkeepers repaired.
+
+    The tracker gives each slot one team for the whole match, but slots change hands. The one
+    slot that can be checked from geometry alone is a keeper: a track that is the deepest player
+    near one goal for most of its life is that goal's keeper, whatever the slot says."""
+    n = len(players)
+    team_f = np.repeat(team[None, :], n, axis=0)
+    xy = players[:, :, :2]
+    for first, last in HALVES:
+        span = slice(first, last + 1)
+        home_x = np.nanmean(np.where(team[None, :] == 0, xy[span, :, 0], np.nan))
+        away_x = np.nanmean(np.where(team[None, :] == 1, xy[span, :, 0], np.nan))
+        left_team = 0 if home_x < away_x else 1      # the team defending x = 0 this half
+        x = xy[span, :, 0]
+        near_box = np.abs(xy[span, :, 1] - PITCH[1] / 2) < 20
+        deepest = {}
+        for goal_team, depth in ((left_team, x), (1 - left_team, PITCH[0] - x)):
+            d = np.where(near_box & (depth < 20), depth, np.inf)
+            best = np.argmin(d, axis=1)
+            ok = np.isfinite(d[np.arange(len(d)), best])
+            deepest[goal_team] = np.where(ok, best, -1)
+        for slot in range(players.shape[1]):
+            for s, e in track_segments(xy[span, slot], 3.0):
+                if e - s + 1 < p["keeper_fix"]:
+                    continue
+                for goal_team, best in deepest.items():
+                    if goal_team != team[slot] and np.mean(best[s:e + 1] == slot) > 0.8:
+                        team_f[first + s:first + e + 1, slot] = goal_team
+    return team_f
+
+
 def team_distances(players, team, xy):
-    """Distance from the ball to the nearest home and the nearest away player, per frame."""
+    """Distance from the ball to the nearest home and the nearest away player, per frame.
+
+    team is one team per slot, or one per slot and frame."""
     d = np.linalg.norm(players[:, :, :2] - xy[:, None, :], axis=2)
-    home = np.nanmin(np.where(team[None, :] == 0, d, np.inf), axis=1)
-    away = np.nanmin(np.where(team[None, :] == 1, d, np.inf), axis=1)
+    team = team if team.ndim == 2 else team[None, :]
+    home = np.nanmin(np.where(team == 0, d, np.inf), axis=1)
+    away = np.nanmin(np.where(team == 1, d, np.inf), axis=1)
     home[~np.isfinite(home)] = np.nan
     away[~np.isfinite(away)] = np.nan
     return home, away
@@ -104,17 +159,42 @@ def rolling_mean(x, half_width):
     return (total[hi] - total[lo]) / np.maximum(count[hi] - count[lo], 1)
 
 
-def slow_stoppages(players, p):
+def deceleration_sync(players):
+    """Share of tracked players slowing by more than 1.5 m/s over the next second, smoothed
+    over +/- 5 frames. Players react to a whistle together; in live play one team accelerates
+    when the other stops, so this rarely gets high."""
+    speeds = players[:, :, 2]
+    drop = np.full(speeds.shape, np.nan, dtype=np.float32)
+    drop[:-FPS] = speeds[:-FPS] - speeds[FPS:]
+    valid = ~np.isnan(drop)
+    share = np.sum(drop > 1.5, axis=1) / np.maximum(np.sum(valid, axis=1), 1)
+    return rolling_mean(share.astype(np.float64), 5)
+
+
+def kick_frames(touch, speed_ahead, p):
+    """Frames where a player is on the ball and it is about to travel at kicking speed."""
+    return (touch >= 0) & (np.nan_to_num(speed_ahead) >= p["kick_speed"])
+
+
+def slow_stoppages(players, p, kicks=None):
     """(start, end) frames of stretches where the whole team slows to a walk: a stoppage the ball
     never left the pitch for -- a foul, an offside, an injury, a goal celebration.
 
     The referee whistles before the players slow down, and players decelerate from the moment of
     the whistle, so the stoppage is dated from the peak of the team's pace in the slow_backoff
-    frames before the walk begins."""
+    frames before the walk begins -- or, with whistle_sync, from the moment most players brake
+    together, less a reaction time.
+
+    With walk_guard, a walk with that many kicks in its first 60% is a slow build-up rather than
+    a stoppage: passes are still being played."""
     speeds = players[:, :, 2]
     tracked = np.sum(~np.isnan(speeds), axis=1)
     mean_speed = np.where(tracked > 0, np.nansum(speeds, axis=1) / np.maximum(tracked, 1), np.nan)
     pace = rolling_mean(mean_speed, p["pace_window"])
+    sync = deceleration_sync(players) if p["whistle_sync"] > 0 else None
+    kick_starts = None
+    if p["walk_guard"] > 0 and kicks is not None:
+        kick_starts = np.flatnonzero(kicks & ~np.r_[False, kicks[:-1]])
     slow = np.r_[False, pace < p["slow_speed"], False]
     starts = np.flatnonzero(~slow[:-1] & slow[1:])
     ends = np.flatnonzero(slow[:-1] & ~slow[1:]) - 1
@@ -122,12 +202,37 @@ def slow_stoppages(players, p):
     for s, e in zip(starts, ends):
         if e - s + 1 < p["min_slow"]:
             continue
+        if kick_starts is not None:
+            head = s + int(0.6 * (e - s + 1))
+            n_kicks = np.sum((kick_starts >= s) & (kick_starts < head))
+            if n_kicks >= p["walk_guard"]:
+                continue
         lo = max(0, s - p["slow_backoff"])
-        out.append((lo + int(np.argmax(pace[lo:s + 1])), e))
+        start = lo + int(np.argmax(pace[lo:s + 1]))
+        if sync is not None:
+            peak = lo + int(np.argmax(sync[lo:s + 1]))
+            if sync[peak] >= p["whistle_sync"]:
+                start = max(0, peak - 15)
+        out.append((start, e))
     return out
 
 
-def dead_half(first, last, touch, out, speed_ahead, stoppages, p):
+def placed_restarts(xy, seen, d_any, p):
+    """Frames where a placed ball is played: it was seen still (under 0.5 m of movement) for
+    placed_restart frames, a player is within 1.5 m, and it moves more than 1 m in the next
+    half second. Every restart in the laws starts from a stationary ball; live play rarely leaves
+    the ball still that long."""
+    n, w = len(xy), p["placed_restart"]
+    still = np.zeros(n, dtype=bool)
+    disp = np.linalg.norm(xy[w:] - xy[:-w], axis=1)
+    still[w:] = (disp < 0.5) & seen[w:] & seen[:-w]
+    moved = np.zeros(n, dtype=bool)
+    moved[:-12] = np.linalg.norm(xy[12:] - xy[:-12], axis=1) > 1.0
+    near = np.nan_to_num(d_any, nan=np.inf) < 1.5
+    return still & moved & near
+
+
+def dead_half(first, last, touch, out, speed_ahead, stoppages, placed, p):
     """Boolean dead-ball mask for one half.
 
     Play stops when the ball leaves the pitch or a slow stoppage begins, and restarts at the
@@ -157,6 +262,8 @@ def dead_half(first, last, touch, out, speed_ahead, stoppages, p):
             give_up = n  # back off the pitch: wait for a real restart
         elif (i - since >= p["min_dead"] and i >= not_before and touch[f] >= 0
               and speed_ahead[f] >= p["kick_speed"]) or i > give_up:
+            is_dead, not_before, give_up = False, 0, n
+        elif placed is not None and placed[f] and i - since >= FPS and i >= not_before:
             is_dead, not_before, give_up = False, 0, n
         dead[i] = is_dead
     return dead
@@ -209,9 +316,26 @@ def possession_run(first, last, episodes, p):
     return team_at
 
 
-def label_half(first, last, touch, out, speed_ahead, stoppages, episodes, p):
+def merge_short(labels, max_len):
+    """Absorb a possession shorter than max_len frames that sits between two spells of the other
+    team with no stoppage in between: H H A H H -> H H H H H. On this metric a spurious short
+    spell costs a false positive and splits a true one, while a real one that short is rarely
+    matched at the stricter IoU thresholds anyway."""
+    changes = np.flatnonzero(labels[1:] != labels[:-1]) + 1
+    starts = np.r_[0, changes]
+    ends = np.r_[changes, len(labels)]
+    for k in range(1, len(starts) - 1):
+        a, b = starts[k], ends[k]
+        mid, before, after = labels[a], labels[starts[k - 1]], labels[starts[k + 1]]
+        if (mid in ("H", "A") and before == after and before in ("H", "A") and before != mid
+                and b - a < max_len):
+            labels[a:b] = before
+    return labels
+
+
+def label_half(first, last, touch, out, speed_ahead, stoppages, placed, episodes, p):
     """Labels for one half, frames first..last inclusive, as an array of 'H'/'A'/'D'/'X'."""
-    dead = dead_half(first, last, touch, out, speed_ahead, stoppages, p)
+    dead = dead_half(first, last, touch, out, speed_ahead, stoppages, placed, p)
     labels = np.full(len(dead), "D", dtype="<U1")
 
     alive = np.flatnonzero(~dead)
@@ -221,7 +345,10 @@ def label_half(first, last, touch, out, speed_ahead, stoppages, episodes, p):
             lo, hi = alive[a], alive[b]
             team_at = possession_run(first + lo, first + hi, episodes, p)
             labels[lo:hi + 1] = np.where(team_at == 0, "H", np.where(team_at == 1, "A", "X"))
-    return fill_unknown(labels)
+    labels = fill_unknown(labels)
+    if p["merge_short"] > 0:
+        labels = merge_short(labels, p["merge_short"])
+    return labels
 
 
 def fill_unknown(labels):
@@ -240,17 +367,21 @@ def fill_unknown(labels):
 def predict(players, ball, team, params=None, n_frames=None):
     p = dict(DEFAULTS, **(params or {}))
     n_frames = n_frames or len(ball)
-    xy, _ = clean_ball(ball, p)
-    d_home, d_away = team_distances(players, team, xy)
+    xy, seen = clean_ball(ball, p)
+    team_f = keeper_teams(players, team, p) if p["keeper_fix"] > 0 else team
+    d_home, d_away = team_distances(players, team_f, xy)
     touch = touches(d_home, d_away, p)
     out = out_of_play(xy, p)
     speed = ball_speed_ahead(xy, FPS // 2)
+    placed = (placed_restarts(xy, seen, np.fmin(d_home, d_away), p)
+              if p["placed_restart"] > 0 else None)
 
     episodes = touch_episodes(touch, p["max_break"])
-    stoppages = slow_stoppages(players, p) if p["slow_speed"] > 0 else []
+    stoppages = (slow_stoppages(players, p, kick_frames(touch, speed, p))
+                 if p["slow_speed"] > 0 else [])
 
     labels = np.full(n_frames, "X", dtype="<U1")
     for first, last in HALVES:
-        labels[first:last + 1] = label_half(first, last, touch, out, speed, stoppages,
+        labels[first:last + 1] = label_half(first, last, touch, out, speed, stoppages, placed,
                                             episodes, p)
     return labels
