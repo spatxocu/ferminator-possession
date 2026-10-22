@@ -189,6 +189,7 @@ pip install -r solution/requirements.txt        # numpy==2.4.6, pandas==3.0.3 (P
 python solution/run.py --name ferminator        # -> evaluation/results/ferminator.csv
 python evaluation/validate_submission.py evaluation/results/ferminator.csv
 python evaluation/run_evaluation.py             # score on the public 5 minutes
+python solution/rebuild.py                      # build twice, confirm identical, validate, score
 ```
 
 The output is deterministic: running it twice gives a byte-identical file. The first run parses

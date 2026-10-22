@@ -6,7 +6,8 @@ document is [`ferminator.md`](ferminator.md).
 
 **Method in one line:** dead balls from the ball leaving the pitch or the whole team slowing to a
 walk; in live play the ball belongs to the last team in *control*, and changes hands only when
-the other team keeps it or passes it on, not on a deflection.
+the other team keeps it or passes it on, not on a deflection. A self-trained team-shape model
+vetoes short possessions the teams' shapes disagree with.
 
 **Regenerate the submission** (the match data is not in this repository — unpack it into `./data`
 or point `MTAH_DATA_DIR` at it):
@@ -15,7 +16,9 @@ or point `MTAH_DATA_DIR` at it):
 pip install -r solution/requirements.txt
 python solution/run.py                                        # -> evaluation/results/ferminator.csv
 python evaluation/validate_submission.py evaluation/results/ferminator.csv
-python evaluation/run_evaluation.py                           # public 5 minutes: spellF1 0.5667
+python evaluation/run_evaluation.py                           # public 5 minutes: spellF1 0.6000
+python solution/rebuild.py                                    # all of the above, twice, and checks
+                                                              # the two runs are byte-identical
 ```
 
 ---
