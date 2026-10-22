@@ -49,6 +49,11 @@ DEFAULTS = dict(
                            # player is a restart (corner, goal kick, throw-in, kick-off, free kick)
     whistle_sync=0.0,      # fraction of players decelerating together that marks the whistle
     walk_guard=0,          # kicks in the first 60% of a walk that mean play is still flowing
+    gap_viterbi=0,         # frames; re-time switches inside ball gaps at least this long using
+                           # team shape (shape.place_in_gaps)
+    gap_cost=5.0,          # evidence a moved switch must gain over the current one
+    gap_weight=1.0,        # weight on the shape model's log-odds per frame
+    gap_double=0,          # 1: also insert a hidden turnover-and-back inside a gap
 )
 
 
@@ -391,11 +396,14 @@ def predict(players, ball, team, params=None, n_frames=None, extras=None):
         labels[first:last + 1] = label_half(first, last, touch, out, speed, stoppages, placed,
                                             episodes, p)
 
-    if p["shape_veto_len"] > 0 or extras is not None:
+    if p["shape_veto_len"] > 0 or p["gap_viterbi"] > 0 or extras is not None:
         import shape
         prob = shape.home_probability(players, team_f, xy, seen, labels)
         if extras is not None:
             extras["shape_prob"] = prob
         if p["shape_veto_len"] > 0:
             labels = shape.veto_short(labels, prob, p["shape_veto_len"], p["shape_veto_p"])
+        if p["gap_viterbi"] > 0:
+            labels = shape.place_in_gaps(labels, prob, seen, p["gap_viterbi"], p["gap_cost"],
+                                         p["gap_weight"], double=bool(p["gap_double"]))
     return labels

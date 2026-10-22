@@ -27,14 +27,17 @@ GRADED = np.r_[11185:90652, 110808:190198]
 # name -> parameter overrides of possession.DEFAULTS. "current" is the submitted method.
 VARIANTS = {
     "current": {},
-    "no_shape_veto": {"shape_veto_len": 0},
-    # Team-shape veto of short sandwiched possessions: (max length, min probability).
-    "shape_4s_0.25": {"shape_veto_len": 100, "shape_veto_p": 0.25},
-    "shape_4s_0.45": {"shape_veto_len": 100, "shape_veto_p": 0.45},
-    "shape_2s_0.35": {"shape_veto_len": 50, "shape_veto_p": 0.35},
-    "shape_6s_0.35": {"shape_veto_len": 150, "shape_veto_p": 0.35},
+    # Re-time switches inside ball gaps with the shape model: gap length, cost, weight.
+    "gap2s_c5_w1": {"gap_viterbi": 50},
+    "gap1s_c5_w1": {"gap_viterbi": 25},
+    "gap4s_c5_w1": {"gap_viterbi": 100},
+    "gap2s_c10_w1": {"gap_viterbi": 50, "gap_cost": 10.0},
+    "gap2s_c2_w1": {"gap_viterbi": 50, "gap_cost": 2.0},
+    "gap2s_c5_w0.5": {"gap_viterbi": 50, "gap_weight": 0.5},
+    "gap2s_c5_double": {"gap_viterbi": 50, "gap_double": 1},
 }
 # Tried and dropped (see ferminator.md): merge_short, placed_restart, whistle_sync, walk_guard.
+# Kept: keeper_fix, shape veto (4 s, 0.35).
 
 
 def shape_report(players, ball, team):
